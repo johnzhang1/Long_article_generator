@@ -65,6 +65,13 @@ UNSPLASH_ACCESS_KEY=your_unsplash_access_key
 
 ### 长文生成
 
+命令行：
+
+```zsh or powershell 
+   python long_article_generator test.md
+```
+
+
 ```python
 from long_article_generator import LongArticleGenerator
 
@@ -79,6 +86,10 @@ article = await generator.generate()
 ```
 
 ### 博客生成
+
+```zsh or powershell 
+   python blog_generator test.md
+```
 
 ```python
 from blog_generator import BlogGenerator
