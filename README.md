@@ -1,4 +1,4 @@
-# AI 文章生成器
+# 自动化批量生成万字长文和博客文章
 
 一个基于 AI 的专业文章生成工具，支持长文和博客两种格式的智能创作。本项目利用先进的 AI 技术，结合网络搜索和智能引用，生成高质量、有深度的文章内容。
 
@@ -117,4 +117,5 @@ MIT License
 如有问题或建议，欢迎提交 Issue 或通过以下方式联系：
 
 - GitHub Issues
-- Email: your.email@example.com
+- Email: grow8org@gmail.com
+- Blog：https://yuedu.biz
