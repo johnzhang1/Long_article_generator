@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import aiohttp
 import random
+import statistics
 from typing import List, Dict, Any, Tuple, Optional
 from openai import OpenAI
 from bs4 import BeautifulSoup
@@ -12,6 +13,8 @@ from urllib.parse import quote_plus
 from functools import lru_cache
 from tenacity import retry, stop_after_attempt, wait_exponential
 from dotenv import load_dotenv
+import concurrent.futures
+import time
 
 # 加载环境变量
 load_dotenv()
@@ -30,6 +33,35 @@ client = OpenAI(
 UNSPLASH_ACCESS_KEY = os.getenv('UNSPLASH_ACCESS_KEY')
 EXA_API_KEY = os.getenv('EXA_API_KEY')  # 用于Exa AI搜索的API密钥
 
+# 创建线程池
+thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+# 创建异步会话
+async def get_aiohttp_session():
+    if not hasattr(get_aiohttp_session, 'session'):
+        get_aiohttp_session.session = aiohttp.ClientSession()
+    return get_aiohttp_session.session
+
+# 缓存配置
+CACHE_DIR = "cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+@lru_cache(maxsize=100)
+def get_cached_response(cache_key: str) -> Optional[dict]:
+    """从缓存获取响应"""
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
+    if os.path.exists(cache_file):
+        if time.time() - os.path.getmtime(cache_file) < 3600:  # 1小时缓存
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    return None
+
+def save_to_cache(cache_key: str, data: dict):
+    """保存响应到缓存"""
+    cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
+    with open(cache_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False)
+
 class ArticleGenerator:
     def __init__(self):
         self.topic = ""
@@ -46,8 +78,30 @@ class ArticleGenerator:
         if not self.unsplash_access_key:
             raise ValueError("UNSPLASH_ACCESS_KEY environment variable not set")
         self.image_cache = {}
+        self.used_image_ids = set()  # 用于追踪已使用的图片ID
+        
+        # 添加写作风格配置
+        self.writing_style = """
+写作风格组合：
+- 10% Yuval Noah Harari：宏大叙事、跨学科视角、历史演化
+- 20% Scott Adams：直观解析、系统思维、幽默讽刺
+- 20% Michio Kaku：科学严谨、前瞻视野、通俗易懂
+- 10% Toni Morrison：细腻描写、深度洞察、情感共鸣
+- 10% 马克吐温：诙谐幽默、辛辣讽刺、生动形象
+- 5% 和菜头：理性思考、生活感悟、简洁明快
+- 15% 钱钟书：博学多识、妙语连珠、旁征博引
 
-    def clean_text(self, text: str) -> str:
+写作特征要求：
+1. 具象类比：用生动形象阐释抽象概念
+2. 对话表达：直接用"你"与读者交流
+3. 结构布局：问题/观点-论述-结论
+4. 趣味呈现：巧妙植入诙谐元素
+5. 疑问预答：提前回应可能困惑
+6. 实例说明：结合具体应用场景
+7. 引导思考：以设问代替直接解答
+"""
+
+    async def clean_text(self, text: str) -> str:
         """清理文本，移除HTML标签、多余空白等"""
         # 使用BeautifulSoup清理HTML
         if bool(BeautifulSoup(text, "html.parser").find()):
@@ -159,7 +213,7 @@ class ArticleGenerator:
         ])
         
         # 清理和整理文本
-        cleaned_text = self.clean_text(combined_text)
+        cleaned_text = await self.clean_text(combined_text)
         
         # 使用AI总结和组织信息
         prompt = f"""请对以下搜索结果进行总结和组织，生成一份结构化的信息摘要：
@@ -302,23 +356,32 @@ p5=[第5部分内容要点，包含3-4个重要论述方向，每个方向配有
 
     async def generate_section_content(self, section_num: int, title: str, requirements: str, processed_info: str) -> str:
         """生成章节内容"""
-        prompt = f"""作为专业内容创作者，请根据以下信息创作文章章节：
+        prompt = f"""作为专业内容创作者，请根据以下信息创作文章章节，严格遵循指定的写作风格和特征：
 
 章节标题：{title}
 内容要求：{requirements}
 参考信息：{processed_info}
+
+{self.writing_style}
 
 创作要求：
 1. 内容必须详尽深入，字数不少于2000字
 2. 分析要专业、深入，观点要新颖独到
 3. 每个观点都要有充分论述和具体例证
 4. 确保内容的专业性、可读性和连贯性
-5. 使用三级标题（###）组织内容，确保层次分明，标题格式为"{section_num}.1"、"{section_num}.2"等
+5. 使用三级标题，格式为"{section_num}.x 标题内容"（x为小节序号，如"{section_num}.1 引言"）
+   - 每个小节标题要简洁有力，4-10字为宜
+   - 标题要体现该节核心内容
+   - 序号格式统一，如 {section_num}.1、{section_num}.2 等
 6. 避免泛泛而谈，深入挖掘主题内涵
-7. 重要观点必须注明引用出处，格式为：[作者/机构, 年份]
-8. 引用的数据必须标注来源，格式为：（数据来源：xxx）
-9. 不要在章节末尾添加小结或总结
-10. 适当引用专家观点、研究报告或权威数据
+7. 重要观点和数据必须注明来源，使用以下格式：
+   - 观点引用：根据[来源名称]显示
+   - 数据引用：xxx（数据来源：[来源名称]）
+   - 直接引用：[来源名称]指出："引用内容"
+8. 严格禁止在章节末尾添加任何形式的小结、总结、结语等内容
+9. 适当引用专家观点、研究报告或权威数据
+10. 直接从正文内容开始，不要重复输出主标题
+11. 文章最后不要出现"总而言之"、"综上所述"等总结性语句
 
 直接输出内容，不要包含任何额外说明。"""
 
@@ -329,8 +392,7 @@ p5=[第5部分内容要点，包含3-4个重要论述方向，每个方向配有
                 content = await self.search_and_add_citations(content)
             except Exception as e:
                 print(f"为章节 {title} 添加引用时出错: {str(e)}")
-        
-            return f"\n## {section_num}. {title}\n\n{content}\n"
+            return content
         except Exception as e:
             print(f"生成第{section_num}部分内容出错: {str(e)}")
             return ""
@@ -435,16 +497,28 @@ p5=[第5部分内容要点，包含3-4个重要论述方向，每个方向配有
 
     async def generate_conclusion(self, title: str) -> str:
         """生成文章总结"""
-        prompt = f"""作为专业内容创作者，请为文章《{title}》创作一个富有深度的总结，要求：
+        prompt = f"""作为专业内容创作者，请为文章《{title}》创作一个富有深度的总结，严格遵循指定的写作风格和特征：
 
-1. 总结核心观点（100字以内）
-2. 提炼关键启示（100字以内）
+{self.writing_style}
+
+要求：
+1. 总结核心观点（150字以内）
+   - 运用具象类比
+   - 使用生动形象的语言
+   - 体现跨学科视角
+
+2. 提炼关键启示（150字以内）
+   - 采用对话式表达
+   - 引导读者思考
+   - 预答可能困惑
+
 3. 以一段富有哲理的金句作为升华，要求：
-   - 言简意赅，20-30字
+   - 言简意赅，30-40字
    - 富有哲理性和启发性
    - 紧扣主题
    - 具有诗意美感
    - 能引发深度思考
+   - 巧妙融入幽默元素
 
 输出格式：
 [核心观点]
@@ -466,16 +540,21 @@ xxx"""
     async def generate_intro(self, title: str) -> str:
         """生成文章导读"""
         try:
-            prompt = f"""请为以下文章生成一段导读：
-            文章标题：{title}
+            prompt = f"""请为以下文章生成一段导读，严格遵循指定的写作风格和特征：
             
-            要求：
-            1. 200字左右
-            2. 说明为什么要阅读这篇文章
-            3. 点明文章的核心价值和主要收获
-            4. 语言要有吸引力，激发读者兴趣
-            5. 不要用"本文"、"文章"等字眼
-            """
+文章标题：{title}
+
+{self.writing_style}
+            
+要求：
+1. 200字左右
+2. 说明为什么要阅读这篇文章
+3. 点明文章的核心价值和主要收获
+4. 语言要有吸引力，激发读者兴趣
+5. 不要用"本文"、"文章"等字眼
+6. 采用对话式表达，直接与读者交流
+7. 巧妙植入一个引人深思的问题
+"""
             
             intro = await self.call_openai(prompt)
             return intro
@@ -499,26 +578,50 @@ xxx"""
             # Check cache first
             cache_key = f"{query}_{section_content[:100]}"
             if cache_key in self.image_cache:
-                return self.image_cache[cache_key]
+                cached_image = self.image_cache[cache_key]
+                if cached_image.get('id') in self.used_image_ids:
+                    del self.image_cache[cache_key]
+                else:
+                    return cached_image
 
-            # 从section内容中提取关键词来优化图片搜索
+            # 分析内容并优化搜索查询
             if section_content:
-                # 生成更精确的搜索查询
-                search_prompt = f"""Analyze the following text and generate the best image search query.
-                Requirements:
-                1. Extract 3-5 most representative keywords that capture the core content
-                2. Prioritize visually expressive terms
-                3. Include both concrete and abstract concepts
-                4. Avoid overly broad terms
-                5. Consider emotional and atmospheric elements
-                6. Format: return only English keywords, separated by spaces
+                search_prompt = f"""分析以下文本内容，生成最佳的图片搜索关键词组合。
 
-                Text content:
-                {section_content[:500]}...
-                """
+要求：
+1. 提取3-5个最具代表性的视觉关键词
+2. 关键词必须具有明确的视觉特征
+3. 结合具象和抽象概念
+4. 考虑场景、情绪和氛围元素
+5. 避免过于宽泛的词语
+6. 考虑内容的时代背景和文化特征
+7. 优先选择能形成具体画面的词语
+
+文本内容：
+{section_content[:1000]}
+
+输出格式：
+1. 主要视觉元素：（描述最核心的视觉内容）
+2. 场景特征：（描述环境和背景特征）
+3. 情绪氛围：（描述画面应传达的情感）
+4. 风格建议：（描述图片的风格，如：现代、复古、科技感等）
+5. 搜索关键词：（输出英文关键词，用空格分隔）"""
+
+                analysis = await self.call_openai(search_prompt)
                 
-                enhanced_keywords = await self.call_openai(search_prompt)
-                query = f"{query} {enhanced_keywords.strip()}"
+                # 解析分析结果
+                keywords = ""
+                style_tags = ""
+                for line in analysis.split('\n'):
+                    if line.startswith('搜索关键词：'):
+                        keywords = line.split('：')[1].strip()
+                    elif line.startswith('风格建议：'):
+                        style = line.split('：')[1].strip()
+                        # 转换风格描述为英文标签
+                        style_prompt = f"将这个图片风格描述转换为2-3个英文风格标签（如modern, vintage, tech等）：{style}"
+                        style_tags = await self.call_openai(style_prompt)
+
+                query = f"{query} {keywords} {style_tags}"
 
             # 构建Unsplash API请求
             url = "https://api.unsplash.com/search/photos"
@@ -526,242 +629,181 @@ xxx"""
             params = {
                 "query": query,
                 "per_page": 30,  # Get more results for better selection
-                "orientation": "landscape",
                 "content_filter": "high",
-                "order_by": "relevant"
+                "orientation": "landscape"
             }
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, params=params) as response:
-                    response.raise_for_status()  # Raise exception for bad status codes
-                    
-                    data = await response.json()
-                    if not data.get("results"):
-                        print(f"No images found for query: {query}")
-                        return None
-
-                    # Filter and score images based on multiple criteria
-                    scored_images = []
-                    for img in data["results"]:
-                        score = 0
-                        # Relevancy score (if available)
-                        score += img.get("relevancy_score", 0) * 3
-                        # Likes indicate image quality
-                        score += min(img.get("likes", 0) / 100, 5)
-                        # Prefer images with descriptions
-                        score += 2 if img.get("description") else 0
-                        # Prefer images with focus on the subject
-                        score += 1 if img.get("color") != "#FFFFFF" else 0
+                    if response.status == 200:
+                        data = await response.json()
+                        results = data.get("results", [])
                         
-                        scored_images.append((score, img))
+                        if not results:
+                            return None
 
-                    # Sort by score and get top 5
-                    top_images = sorted(scored_images, key=lambda x: x[0], reverse=True)[:5]
-                    
-                    if not top_images:
-                        return None
+                        # 计算每张图片的综合得分
+                        scored_images = []
+                        for img in results:
+                            if img['id'] in self.used_image_ids:
+                                continue
+                                
+                            score = 0
+                            
+                            # 1. 基础质量分数 (0-30分)
+                            quality_score = min(img['likes'] / 50, 30)  # 最高30分
+                            score += quality_score
+                            
+                            # 2. 图片尺寸适合度 (0-20分)
+                            width, height = img['width'], img['height']
+                            ratio = width / height
+                            if 1.3 <= ratio <= 1.8:  # 黄金比例附近
+                                score += 20
+                            elif 1.0 <= ratio <= 2.0:  # 可接受范围
+                                score += 10
+                                
+                            # 3. 颜色分析 (0-20分)
+                            if img.get('color'):  # 颜色和谐度
+                                # 避免过于极端的颜色
+                                color = img['color'].lstrip('#')
+                                r, g, b = tuple(int(color[i:i+2], 16) for i in (0, 2, 4))
+                                color_variance = statistics.variance([r, g, b])
+                                if 1000 <= color_variance <= 5000:  # 适中的颜色变化
+                                    score += 20
+                                elif color_variance < 8000:  # 可接受的颜色变化
+                                    score += 10
+                                    
+                            # 4. 内容相关性分数 (0-30分)
+                            description = img.get('description', '') or img.get('alt_description', '')
+                            tags = [tag['title'] for tag in img.get('tags', [])]
+                            
+                            relevance_prompt = f"""评估图片描述与内容的相关性（0-30分）。
 
-                    # Randomly select one of the top images to add variety
-                    selected_image = random.choice(top_images)[1]
-                    
-                    result = {
-                        "url": selected_image["urls"]["regular"],
-                        "description": selected_image.get("description", ""),
-                        "author": selected_image["user"]["name"],
-                        "author_url": selected_image["user"]["links"]["html"],
-                        "download_url": selected_image["links"]["download"],
-                    }
+图片描述：{description}
+图片标签：{', '.join(tags)}
 
-                    # Cache the result
-                    self.image_cache[cache_key] = result
-                    return result
-                    
+内容主题：{query}
+内容摘要：{section_content[:200] if section_content else ''}
+
+评分标准：
+1. 主题相关性 (0-10分)
+2. 情感氛围匹配 (0-10分)
+3. 视觉元素匹配 (0-10分)
+
+只返回最终分数（0-30的整数）"""
+
+                            try:
+                                relevance_score = int(await self.call_openai(relevance_prompt))
+                                score += relevance_score
+                            except (ValueError, TypeError):
+                                score += 15  # 默认中等相关性分数
+                                
+                            scored_images.append({
+                                'data': img,
+                                'score': score
+                            })
+                            
+                        if not scored_images:
+                            return None
+                            
+                        # 按分数排序并选择最佳图片
+                        scored_images.sort(key=lambda x: x['score'], reverse=True)
+                        best_image = scored_images[0]['data']
+                        
+                        # 记录已使用的图片ID
+                        self.used_image_ids.add(best_image['id'])
+                        
+                        # 构建返回数据
+                        image_data = {
+                            'id': best_image['id'],
+                            'url': best_image['urls']['regular'],
+                            'thumb': best_image['urls']['thumb'],
+                            'description': best_image.get('description', '') or best_image.get('alt_description', ''),
+                            'author': best_image['user']['name'],
+                            'author_url': best_image['user']['links']['html'],
+                            'download_url': best_image['links']['download'],
+                            'score': scored_images[0]['score']
+                        }
+                        
+                        # 缓存结果
+                        self.image_cache[cache_key] = image_data
+                        return image_data
+                        
+            return None
+                        
         except Exception as e:
-            print(f"Error getting image: {str(e)}")
+            print(f"Error in get_image: {str(e)}")
             return None
 
     async def search_and_add_citations(self, text: str) -> str:
         """搜索并添加引用链接，使用 Markdown 链接格式"""
         # 识别需要引用的内容类型
         citation_patterns = {
-            'data': r'(\d+(?:\.\d+)?%|\d{3,}(?:万|亿)?)',  # 数据模式
-            'quote': r'[""](.*?)[""]',  # 引用模式
-            'claim': r'(研究表明|数据显示|报告指出|专家认为|调查发现|统计数据表明|根据.*?显示|据.*?统计)',  # 论证引用模式
+            'data': r'（数据来源：\[(.*?)\]）',  # 数据来源引用
+            'quote': r'\[(.*?)\]指出：“(.*?)”',  # 直接引用
+            'claim': r'根据\[(.*?)\]显示',  # 观点引用
         }
         
         # 为每种类型的内容添加引用
         for citation_type, pattern in citation_patterns.items():
             matches = re.finditer(pattern, text)
             for match in matches:
-                matched_text = match.group()
-                # 对于每个匹配项进行搜索
-                search_query = matched_text
                 if citation_type == 'data':
-                    search_query = f"数据来源 {matched_text}"
+                    source_name = match.group(1)
+                    full_match = match.group(0)
                 elif citation_type == 'quote':
-                    search_query = f"原文引用 {matched_text}"
+                    source_name = match.group(1)
+                    quote_content = match.group(2)
+                    full_match = match.group(0)
                 elif citation_type == 'claim':
-                    search_query = f"论证来源 {matched_text}"
+                    source_name = match.group(1)
+                    full_match = match.group(0)
                 
                 try:
                     # 使用Exa搜索相关内容
+                    search_query = f"{source_name} {citation_type}"
+                    if citation_type == 'quote':
+                        search_query = f"{source_name} {quote_content}"
+                    
                     search_results = await self.search_web(search_query)
                     if search_results:
                         # 选择最相关的结果
                         best_result = max(search_results, key=lambda x: x.get('score', 0))
-                        # 添加 Markdown 格式的引用链接
-                        citation_text = f"{matched_text} [{best_result.get('title', '来源')}]({best_result['url']})"
-                        text = text.replace(matched_text, citation_text, 1)
+                        # 根据不同类型构建新的引用文本
+                        if citation_type == 'data':
+                            new_text = f"（数据来源：[{source_name}]({best_result['url']})）"
+                        elif citation_type == 'quote':
+                            new_text = f'[{source_name}]({best_result["url"]})指出：“{quote_content}”'
+                        else:  # claim
+                            new_text = f"根据[{source_name}]({best_result['url']})显示"
+                        
+                        text = text.replace(full_match, new_text, 1)
                 except Exception as e:
-                    print(f"为{matched_text}添加引用时出错: {str(e)}")
+                    print(f"为{full_match}添加引用时出错: {str(e)}")
                     continue
         
         return text
 
-    async def format_article_with_references(self, content: str) -> str:
-        """在文章内容中添加所有类型的引用链接"""
-        formatted_content = content
-        
-        # 1. 添加关键词引用
-        for keyword in self.keywords:
-            if keyword in self.keyword_urls:
-                urls = self.keyword_urls[keyword]
-                if urls:
-                    best_url = max(urls, key=lambda x: x.get('relevance_score', 0))
-                    formatted_content = formatted_content.replace(
-                        keyword,
-                        f"{keyword} [{best_url.get('title', '相关资料')}]({best_url['url']})",
-                        1  # 只替换第一次出现
-                    )
-        
-        # 2. 添加其他引用（数据、引用、论证等）
-        try:
-            formatted_content = await self.search_and_add_citations(formatted_content)
-        except Exception as e:
-            print(f"添加引用链接时出错: {str(e)}")
-        
-        return formatted_content
-
-    async def format_article(self) -> str:
+    def format_article(self) -> str:
         """格式化文章内容"""
-        try:
-            current_time = datetime.datetime.now().strftime("%Y-%m-d")
-            article_parts = []
-            
-            # 添加标题和元信息
-            article_parts.append(f"# {self.title}\n\n")
-            article_parts.append(f"作者：玄清\n")
-            article_parts.append(f"时间：{current_time}\n")
-            article_parts.append(f"关键词：{', '.join(self.keywords)}\n")
-            article_parts.append(f"字数：{self.total_words}\n\n")
-            
-            # 添加正文内容
-            seen_titles = set()  # 跟踪所有级别的标题
-            section_counter = 1
-            
-            for section in self.content_sections:
-                # 生成标准化的标题
-                section_title = self.standardize_title(section['title'], seen_titles)
-                seen_titles.add(section_title.lower())
-                
-                # 添加带编号的章节标题
-                article_parts.append(f"\n## {section_counter}. {section_title}\n\n")
-                
-                # 处理子章节
-                subsection_counter = 1
-                content_lines = section['content'].split('\n')
-                current_subsection = []
-                
-                for line in content_lines:
-                    # 检查是否是子标题（以#开头或包含"章"、"节"等关键词）
-                    if line.strip().startswith('#') or any(key in line for key in ['章', '节', '部分']):
-                        # 先处理之前收集的内容
-                        if current_subsection:
-                            processed_content = self.process_section_content('\n'.join(current_subsection))
-                            if processed_content:
-                                article_parts.append(processed_content + '\n\n')
-                            current_subsection = []
-                        
-                        # 处理子标题，统一使用 X.Y 格式
-                        subsection_title = self.standardize_title(line.lstrip('#').strip(), seen_titles)
-                        seen_titles.add(subsection_title.lower())
-                        article_parts.append(f"### {section_counter}.{subsection_counter}. {subsection_title}\n\n")
-                        subsection_counter += 1
-                    else:
-                        current_subsection.append(line)
-                
-                # 处理最后一个子章节的内容
-                if current_subsection:
-                    processed_content = self.process_section_content('\n'.join(current_subsection))
-                    if processed_content:
-                        article_parts.append(processed_content + '\n\n')
-                
-                section_counter += 1
-            
-            # 合并所有内容并添加引用
-            full_content = ''.join(article_parts)
-            formatted_content = await self.format_article_with_references(full_content)
-            
-            return formatted_content
-            
-        except Exception as e:
-            print("生成文章时出错:", str(e))
-            raise
-
-    def standardize_title(self, title: str, seen_titles: set) -> str:
-        """标准化标题，确保不重复"""
-        base_title = re.sub(r'^[#\d\.\s]+', '', title).strip()
-        base_title = re.sub(r'[：:](.*?)$', '', base_title)
+        formatted_content = []
         
-        if base_title.lower() not in seen_titles:
-            return base_title
+        # 添加文章标题
+        formatted_content.append(f"# {self.title}\n")
         
-        # 如果标题重复，添加区分词
-        counter = 1
-        while f"{base_title}（续{counter}）".lower() in seen_titles:
-            counter += 1
-        return f"{base_title}（续{counter}）"
-
-    def process_section_content(self, content: str) -> str:
-        """处理章节内容，移除总结性段落并规范化格式"""
-        # 移除总结性段落
-        lines = content.split('\n')
-        filtered_lines = []
-        skip_section = False
+        # 添加导读
+        if hasattr(self, 'intro') and self.intro:
+            formatted_content.append(f"## 导读\n\n{self.intro}\n")
         
-        for line in lines:
-            # 检查是否包含总结性关键词
-            if any(keyword in line.lower() for keyword in [
-                '总结', '小结', '总的来说', '综上所述', '总而言之', 
-                '结论', '结语', '小结', '总括', '概括来说'
-            ]):
-                skip_section = True
-                continue
-            
-            if not skip_section:
-                # 规范化列表格式为自然段
-                if line.strip().startswith(('- ', '• ', '* ')):
-                    line = line.strip()[2:]
-                filtered_lines.append(line)
+        # 添加正文内容
+        formatted_content.extend(self.content_sections)
         
-        # 合并相邻的短句为自然段
-        processed_lines = []
-        current_paragraph = []
+        # 添加总结
+        if hasattr(self, 'conclusion') and self.conclusion:
+            formatted_content.append(f"## 总结\n\n{self.conclusion}\n")
         
-        for line in filtered_lines:
-            line = line.strip()
-            if not line:
-                if current_paragraph:
-                    processed_lines.append(' '.join(current_paragraph))
-                    current_paragraph = []
-                processed_lines.append('')
-            else:
-                current_paragraph.append(line)
-        
-        if current_paragraph:
-            processed_lines.append(' '.join(current_paragraph))
-        
-        return '\n'.join(processed_lines)
+        # 合并所有内容
+        return "\n".join(formatted_content)
 
     async def translate_and_format_citation(self, text: str, url: str) -> str:
         """翻译非中文引用并格式化引用"""
@@ -853,25 +895,24 @@ xxx"""
             # 生成导读
             print("正在生成导读...")
             intro = await self.generate_intro(self.title)
-            article_parts.append(f"{intro}\n\n")
+            article_parts.append(intro + "\n\n")
             
             self.total_words = len(intro)
             
             # 生成每个章节的内容
-            for i in range(1, 6):
-                print(f"正在生成第{i}部分...")
-                section_key = f'p{i}'
-                title_key = f'z{i}'
+            async def generate_section(section_num: int) -> dict:
+                section_key = f'p{section_num}'
+                title_key = f'z{section_num}'
                 
                 if section_key not in self.outline:
-                    raise Exception(f"大纲中缺少第{i}部分的内容要求")
+                    raise Exception(f"大纲中缺少第{section_num}部分的内容要求")
                 
-                section_title = self.outline.get(title_key, f'第{i}部分')
+                section_title = self.outline.get(title_key, f'第{section_num}部分')
                 section_requirements = self.outline[section_key]
                 
                 # 生成内容
                 content = await self.generate_section_content(
-                    i,
+                    section_num,
                     section_title,
                     section_requirements,
                     self.processed_info
@@ -880,14 +921,33 @@ xxx"""
                 # 统计字数
                 section_words = len(content)
                 self.total_words += section_words
-                print(f"第{i}部分完成，字数：{section_words}")
+                print(f"第{section_num}部分完成，字数：{section_words}")
                 
-                # 获取并添加图片
-                image_url = await self.get_image(section_title, content)
-                if image_url:
-                    article_parts.append(f"\n![{section_title}]({image_url['url']})\n\n")
+                # 获取配图
+                image_data = await self.get_image(section_title, content)
                 
-                article_parts.append(content)
+                return {
+                    'number': section_num,
+                    'title': section_title,
+                    'content': content,
+                    'image': image_data
+                }
+            
+            # 并行生成所有章节
+            sections = await asyncio.gather(*[generate_section(i) for i in range(1, 6)])
+            
+            # 按章节顺序组装文章
+            sections.sort(key=lambda x: x['number'])
+            for section in sections:
+                # 添加章节标题
+                article_parts.append(f"\n## {section['number']}. {section['title']}\n\n")
+                
+                # 添加配图（如果有）
+                if section['image']:
+                    article_parts.append(f"![{section['title']}]({section['image']['url']})\n\n")
+                
+                # 添加章节内容
+                article_parts.append(f"{section['content']}\n\n")
             
             # 生成总结
             print("正在生成总结...")
@@ -895,7 +955,8 @@ xxx"""
             article_parts.append(f"\n## 总结与展望\n\n{conclusion}\n")
             
             # 添加引用链接
-            formatted_article = await self.format_article_with_references(''.join(article_parts))
+            article_text = ''.join(article_parts)
+            formatted_article = await self.search_and_add_citations(article_text)
             
             # 保存文章
             print("正在保存文章...")
