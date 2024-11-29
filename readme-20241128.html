@@ -1,0 +1,244 @@
+
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>文章预览</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }
+            .container {
+                background-color: white;
+                padding: 40px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            h1, h2, h3, h4, h5, h6 {
+                color: #2c3e50;
+                margin-top: 24px;
+                margin-bottom: 16px;
+            }
+            h1 {
+                font-size: 2em;
+                border-bottom: 2px solid #eaecef;
+                padding-bottom: 0.3em;
+            }
+            h2 {
+                font-size: 1.5em;
+                border-bottom: 1px solid #eaecef;
+                padding-bottom: 0.3em;
+            }
+            p {
+                margin: 16px 0;
+            }
+            img {
+                max-width: 100%;
+                height: auto;
+                display: block;
+                margin: 20px auto;
+                border-radius: 4px;
+            }
+            blockquote {
+                border-left: 4px solid #42b983;
+                margin: 16px 0;
+                padding: 0 16px;
+                color: #666;
+            }
+            code {
+                background-color: #f8f8f8;
+                padding: 2px 4px;
+                border-radius: 3px;
+                font-family: Consolas, Monaco, 'Andale Mono', monospace;
+            }
+            pre {
+                background-color: #f8f8f8;
+                padding: 16px;
+                overflow: auto;
+                border-radius: 3px;
+            }
+            a {
+                color: #42b983;
+                text-decoration: none;
+            }
+            a:hover {
+                text-decoration: underline;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Long Article Generator - AI文章生成器</h1>
+<h2>🌟 项目概述</h2>
+<p>这是一个基于AI的长文生成工具，能够自动生成高质量的长篇文章和博客内容。该工具利用多个AI API和外部服务，提供丰富的内容生成功能。</p>
+<h2>🔧 主要功能</h2>
+<h3>1. 文章生成</h3>
+<ul>
+<li>支持长篇文章自动生成</li>
+<li>多样化的写作风格</li>
+<li>结构化的内容组织</li>
+<li>智能分段和章节划分</li>
+<li>自动生成引言和结论</li>
+</ul>
+<h3>2. 内容增强</h3>
+<ul>
+<li>整合Unsplash图片资源</li>
+<li>支持web搜索功能（通过Exa.ai）</li>
+<li>自动添加相关图片说明</li>
+<li>智能关键词提取</li>
+</ul>
+<h3>3. 格式转换</h3>
+<ul>
+<li>Markdown格式输出</li>
+<li>HTML页面生成</li>
+<li>响应式网页设计</li>
+<li>优雅的排版样式</li>
+</ul>
+<h2>📁 项目结构</h2>
+<pre><code>Long_article_generator/
+├── blog_generator.py      # 博客生成核心模块
+├── long_article_generator.py  # 长文生成核心模块
+├── md2html.py            # Markdown转HTML工具
+├── .env                  # 环境配置文件
+└── generated_articles/   # 生成的文章存储目录
+</code></pre>
+<h2>⚙️ 配置说明</h2>
+<h3>环境变量</h3>
+<pre><code>OPENAI_API_KEY=your_api_key
+OPENAI_API_BASE=your_api_base_url
+OPENAI_API_TYPE=openai/azure
+UNSPLASH_ACCESS_KEY=your_unsplash_key
+EXA_API_KEY=your_exa_key
+</code></pre>
+<h3>API支持</h3>
+<ul>
+<li>OpenAI标准API</li>
+<li>Azure OpenAI API</li>
+<li>Unsplash图片API</li>
+<li>Exa.ai搜索API</li>
+</ul>
+<h2>🚀 新增功能</h2>
+<h3>1. API配置增强</h3>
+<ul>
+<li>灵活的API基础URL配置</li>
+<li>支持多种API类型（OpenAI/Azure）</li>
+<li>改进的错误处理机制</li>
+<li>URL路径标准化处理</li>
+</ul>
+<h3>2. HTML转换功能</h3>
+<ul>
+<li>新增md2html.py转换工具</li>
+<li>响应式网页设计</li>
+<li>优雅的排版样式</li>
+<li>图片自适应显示</li>
+<li>良好的阅读体验</li>
+</ul>
+<h3>3. 代码改进</h3>
+<ul>
+<li>更强大的错误处理</li>
+<li>调试信息输出</li>
+<li>API路径处理优化</li>
+<li>环境变量配置验证</li>
+</ul>
+<h2>💡 使用说明</h2>
+<ol>
+<li>生成文章：</li>
+</ol>
+<pre><code class="language-bash">python blog_generator.py input.md
+</code></pre>
+<ol>
+<li>生成长文：</li>
+</ol>
+<pre><code class="language-bash">python long_article_generator.py input.md
+</code></pre>
+<ol>
+<li>转换为HTML：</li>
+</ol>
+<pre><code class="language-bash">python md2html.py generated_articles/your_article.md
+</code></pre>
+<h2>🛠 技术特点</h2>
+<ol>
+<li>文章生成</li>
+<li>智能内容结构化</li>
+<li>多样化写作风格</li>
+<li>自动图文匹配</li>
+<li>
+<p>SEO优化支持</p>
+</li>
+<li>
+<p>HTML转换</p>
+</li>
+<li>响应式设计</li>
+<li>现代化UI风格</li>
+<li>优化的阅读体验</li>
+<li>
+<p>自适应图片显示</p>
+</li>
+<li>
+<p>API集成</p>
+</li>
+<li>灵活的API配置</li>
+<li>多API类型支持</li>
+<li>错误处理机制</li>
+<li>调试信息输出</li>
+</ol>
+<h2>📝 注意事项</h2>
+<ol>
+<li>API密钥配置</li>
+<li>确保所有必要的API密钥都已正确配置</li>
+<li>检查API基础URL设置</li>
+<li>
+<p>验证API类型选择</p>
+</li>
+<li>
+<p>环境要求</p>
+</li>
+<li>Python 3.8+</li>
+<li>必要的Python包：</li>
+<li>openai</li>
+<li>markdown</li>
+<li>beautifulsoup4</li>
+<li>
+<p>requests</p>
+</li>
+<li>
+<p>文件权限</p>
+</li>
+<li>确保生成目录具有写入权限</li>
+<li>检查配置文件访问权限</li>
+</ol>
+<h2>🔄 更新日志</h2>
+<h3>2024-01-28</h3>
+<ol>
+<li>新增功能：</li>
+<li>HTML转换工具</li>
+<li>响应式网页设计</li>
+<li>
+<p>API配置增强</p>
+</li>
+<li>
+<p>改进：</p>
+</li>
+<li>错误处理机制</li>
+<li>API路径处理</li>
+<li>
+<p>调试信息输出</p>
+</li>
+<li>
+<p>修复：</p>
+</li>
+<li>API endpoint配置问题</li>
+<li>URL路径规范化</li>
+<li>环境变量验证</li>
+</ol>
+        </div>
+    </body>
+    </html>
+    

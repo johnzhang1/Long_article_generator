@@ -20,16 +20,34 @@ import time
 load_dotenv()
 
 # 配置API客户端
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-if not OPENAI_API_KEY:
+api_key = os.getenv('OPENAI_API_KEY')
+if not api_key:
     raise ValueError("OPENAI_API_KEY environment variable not set")
 
-client = OpenAI(
-    base_url="https://api.gptsapi.net/v1",
-    api_key=OPENAI_API_KEY,
-    timeout=60.0,  # 增加超时时间
-    max_retries=3  # 添加重试次数
-)
+api_base = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
+api_type = os.getenv('OPENAI_API_TYPE', 'openai')
+
+if api_type == 'azure':
+    client = OpenAI(
+        api_key=api_key,
+        base_url=f"{api_base}/openai/deployments/gpt-35-turbo",
+        api_version=os.getenv('OPENAI_API_VERSION', '2023-05-15'),
+        default_headers={"api-key": api_key}
+    )
+else:
+    # 处理base_url
+    if api_base.endswith('/'):
+        api_base = api_base[:-1]
+    if not api_base.endswith('/v1'):
+        api_base = f"{api_base}/v1"
+    
+    print(f"Using API base URL: {api_base}")
+    
+    client = OpenAI(
+        api_key=api_key,
+        base_url=api_base
+    )
+
 UNSPLASH_ACCESS_KEY = os.getenv('UNSPLASH_ACCESS_KEY')
 EXA_API_KEY = os.getenv('EXA_API_KEY')  # 用于Exa AI搜索的API密钥
 
@@ -986,6 +1004,23 @@ async def main():
         output_file = f"generated_articles/article_{i}_{topic}.md"
         await generator.generate_article(topic, output_file)
         print(f"文章已生成并保存到: {output_file}")
+
+def generate_long_article(input_file):
+    """
+    生成长文的主函数
+    :param input_file: 输入文件路径
+    :return: None
+    """
+    # 读取输入文件
+    with open(input_file, 'r', encoding='utf-8') as f:
+        topic = f.read().strip()
+
+    # 创建输出目录
+    os.makedirs('generated_articles', exist_ok=True)
+    
+    # 生成文章
+    article = ArticleGenerator()
+    asyncio.run(article.generate_article(topic, f"generated_articles/article_{topic}.md"))
 
 if __name__ == "__main__":
     asyncio.run(main())

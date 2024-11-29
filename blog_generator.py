@@ -6,21 +6,57 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 # 加载环境变量
-
 load_dotenv()
 
-# 检查API密钥
+# OpenAI模型配置
+MODEL_CONFIG = {
+    'default': {
+        'model': 'gpt-4o-mini',
+        'temperature': 0.8,
+        'max_tokens': 150
+    },
+    'title': {
+        'model': 'gpt-4o-mini',
+        'temperature': 0.8,
+        'max_tokens': 150,
+        'system_role': '你是一位深谙用户心理的新媒体标题专家，擅长创作能引发思考和情感共鸣的标题'
+    },
+    'content': {
+        'model': 'gpt-4o-mini',
+        'temperature': 0.7,
+        'max_tokens': 2000,
+        'system_role': '你是一位融合了历史学家的宏大视野、作家的文学功底、科学家的想象力、以及文化评论家的洞察力的写作大师'
+    }
+}
 
+# 检查API密钥和代理配置
 api_key = os.getenv('OPENAI_API_KEY')
 if not api_key:
-    raise ValueError("请在.env文件中设置OPENAI_API_KEY")
+    raise ValueError("OPENAI_API_KEY environment variable not set")
 
-# 初始化OpenAI客户端
+api_base = os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1')
+api_type = os.getenv('OPENAI_API_TYPE', 'openai')
 
-client = OpenAI(
-    base_url="https://api.gptsapi.net/v1",
-    api_key=api_key
-)
+if api_type == 'azure':
+    client = OpenAI(
+        api_key=api_key,
+        base_url=f"{api_base}/openai/deployments/gpt-35-turbo",
+        api_version=os.getenv('OPENAI_API_VERSION', '2023-05-15'),
+        default_headers={"api-key": api_key}
+    )
+else:
+    # 处理base_url
+    if api_base.endswith('/'):
+        api_base = api_base[:-1]
+    if not api_base.endswith('/v1'):
+        api_base = f"{api_base}/v1"
+    
+    print(f"Using API base URL: {api_base}")
+    
+    client = OpenAI(
+        api_key=api_key,
+        base_url=api_base
+    )
 
 def get_writing_style_prompt():
     """获取混合写作风格的提示"""
@@ -81,13 +117,13 @@ def generate_title(topic):
 请根据主题"{topic}"的特点，选择最适合的模式和结构。只返回标题文本，不需要解释。"""
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=MODEL_CONFIG['title']['model'],
             messages=[
-                {"role": "system", "content": "你是一位深谙用户心理的新媒体标题专家，擅长创作能引发思考和情感共鸣的标题"},
+                {"role": "system", "content": MODEL_CONFIG['title']['system_role']},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.8,
-            max_tokens=150
+            temperature=MODEL_CONFIG['title']['temperature'],
+            max_tokens=MODEL_CONFIG['title']['max_tokens']
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -97,6 +133,7 @@ def generate_title(topic):
 def generate_introduction(topic):
     """生成文章引言"""
     try:
+        print("✨ 正在生成引言...")
         style_prompt = get_writing_style_prompt()
         prompt = f"""为主题"{topic}"创作一段引言，要求：
         1. 字数300-500字
@@ -111,13 +148,13 @@ def generate_introduction(topic):
         只需要返回引言内容，不需要其他内容。"""
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=MODEL_CONFIG['content']['model'],
             messages=[
-                {"role": "system", "content": "你是一位融合了历史学家的宏大视野、作家的文学功底、科学家的想象力、以及文化评论家的洞察力的写作大师"},
+                {"role": "system", "content": MODEL_CONFIG['content']['system_role']},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=1000
+            temperature=MODEL_CONFIG['content']['temperature'],
+            max_tokens=MODEL_CONFIG['content']['max_tokens']
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -127,6 +164,7 @@ def generate_introduction(topic):
 def generate_section_content(topic, section_number, previous_content=None):
     """生成单个章节的内容，包含小节结构"""
     try:
+        print(f"📚 正在生成第{section_number}章节...")
         style_prompt = get_writing_style_prompt()
         
         # 标准化的章节结构
@@ -208,13 +246,13 @@ def generate_section_content(topic, section_number, previous_content=None):
         请直接返回内容，无需额外说明。"""
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=MODEL_CONFIG['content']['model'],
             messages=[
-                {"role": "system", "content": "你是一位融合了历史学家的宏大视野、作家的文学功底、科学家的想象力、以及文化评论家的洞察力的写作大师"},
+                {"role": "system", "content": MODEL_CONFIG['content']['system_role']},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=4000
+            temperature=MODEL_CONFIG['content']['temperature'],
+            max_tokens=MODEL_CONFIG['content']['max_tokens']
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -224,6 +262,7 @@ def generate_section_content(topic, section_number, previous_content=None):
 def get_unsplash_images(keyword, count=3):
     """获取Unsplash图片"""
     try:
+        print(f"📸 正在获取与'{keyword}'相关的图片...")
         headers = {
             'Authorization': f'Client-ID {os.getenv("UNSPLASH_ACCESS_KEY")}'
         }
@@ -251,6 +290,7 @@ def get_unsplash_images(keyword, count=3):
 
 def format_article(title, sections, images, topic):
     """格式化文章内容"""
+    print("📄 正在组装文章...")
     article = f"# {title}\n\n"
     
     # 添加引言
@@ -293,46 +333,33 @@ def format_article(title, sections, images, topic):
 def validate_article(content):
     """验证文章格式和内容"""
     try:
-        sections = content.split('##')
-        if len(sections) != 7:  # 标题 + 引言 + 5个章节
-            print("警告：章节数量不正确")
-            return False
-            
-        # 检查每个章节的字数和内容
-        for i, section in enumerate(sections[2:], 2):  # 跳过标题和引言
-            text = section.split('\n', 1)[1]  # 去掉标题行
-            text = text.replace('![', '').replace(']', '')  # 去掉图片标记
-            
-            # 检查字数
-            word_count = len(text.strip())
-            if word_count < 800 or word_count > 1200:
-                print(f"警告：第{i}章节字数不符合要求（当前{word_count}字）")
-                return False
-            
-            # 检查不应出现的总结性词语
-            if i < 6:  # 非结尾章节
-                forbidden_words = [
-                    "总结", "结语", "小结", "总的来说", "综上所述",
-                    "参考文献", "引用", "Reference", "Bibliography",
-                    "归纳", "概括", "小结一下", "总而言之",
-                    "最后", "结论", "总结来看", "总的说来"
-                ]
-                for word in forbidden_words:
-                    if word in text:
-                        print(f"警告：第{i}章节中出现了不适合的总结性词语：{word}")
-                        return False
-                
-            # 检查段落长度
-            paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
-            for p in paragraphs:
-                if len(p) < 50:  # 段落太短
-                    print("警告：存在过短的段落")
-                    return False
-                if len(p) > 800:  # 段落太长
-                    print("警告：存在过长的段落")
-                    return False
-                    
-        return True
+        print("🔍 正在验证文章格式...")
+        import re
+        # 检查是否包含必要的部分
+        has_title = bool(re.search(r'^#\s+.+', content, re.MULTILINE))
+        has_intro = '## 引言' in content or '## 简介' in content
+        chapters = len(re.findall(r'^##\s+(?!引言|简介|总结|结语).+', content, re.MULTILINE))
+        has_conclusion = '## 总结' in content or '## 结语' in content
+        
+        # 检查章节数量
+        if not (3 <= chapters <= 5):
+            print(f"提示：章节数量建议在3-5个之间，当前有 {chapters} 个章节")
+        
+        # 检查格式完整性
+        format_complete = has_title and has_intro and chapters > 0 and has_conclusion
+        if not format_complete:
+            missing = []
+            if not has_title:
+                missing.append("标题")
+            if not has_intro:
+                missing.append("引言")
+            if chapters == 0:
+                missing.append("主体章节")
+            if not has_conclusion:
+                missing.append("结语")
+            print(f"提示：文章缺少以下部分: {', '.join(missing)}")
+        
+        return format_complete
     except Exception as e:
         print(f"验证文章格式时出错: {str(e)}")
         return False
@@ -340,6 +367,7 @@ def validate_article(content):
 def generate_transition(previous_content, next_section_title):
     """生成章节之间的过渡语"""
     try:
+        print(f"🔄 正在生成'{next_section_title}'章节的过渡语...")
         prompt = f"""根据上一章节的内容：
         {previous_content[-200:]}
         
@@ -352,13 +380,13 @@ def generate_transition(previous_content, next_section_title):
         只需要返回过渡语，不需要其他内容。"""
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=MODEL_CONFIG['default']['model'],
             messages=[
                 {"role": "system", "content": "你是一个善于写作过渡语的作家，擅长用流畅自然的方式连接不同章节"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=100
+            temperature=MODEL_CONFIG['default']['temperature'],
+            max_tokens=MODEL_CONFIG['default']['max_tokens']
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -368,6 +396,7 @@ def generate_transition(previous_content, next_section_title):
 def generate_epilogue(topic):
     """生成文章结尾的总结升华部分"""
     try:
+        print(f"✨ 正在生成'{topic}'的结语...")
         prompt = f"""请为主题"{topic}"写一段200字左右的总结升华，要求：
         1. 提炼核心启示或价值观
         2. 使用一句经典名言或金句点题
@@ -378,13 +407,13 @@ def generate_epilogue(topic):
         
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=MODEL_CONFIG['default']['model'],
             messages=[
                 {"role": "system", "content": "你是一个擅长文章升华总结的作家"},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=500
+            temperature=MODEL_CONFIG['default']['temperature'],
+            max_tokens=MODEL_CONFIG['default']['max_tokens']
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -394,6 +423,7 @@ def generate_epilogue(topic):
 def generate_article(topic):
     """生成完整文章"""
     try:
+        print(f"📝 正在生成关于'{topic}'的文章...")
         # 生成标题
         title = generate_title(topic)
         if not title:
@@ -456,6 +486,195 @@ def save_article(content, topic):
         print(f"保存文章时出错: {str(e)}")
         return False
 
+def generate_blog(topic, capture_response=False):
+    """
+    生成博客文章的主函数
+    :param topic: 文章主题
+    :param capture_response: 是否捕获API响应
+    :return: 生成的文章内容
+    """
+    try:
+        # 定义总步骤数和当前步骤
+        total_steps = 7  # 标题、引言、3个章节、结尾、格式化
+        current_step = 0
+
+        # 生成文章标题
+        current_step += 1
+        title = generate_title(topic)
+        if capture_response:
+            return {"type": "progress", "step": current_step, "total": total_steps, 
+                   "message": f"✍️ 正在构思标题...", "content": title}
+
+        # 生成文章引言
+        current_step += 1
+        introduction = generate_introduction(topic)
+        if capture_response:
+            return {"type": "progress", "step": current_step, "total": total_steps, 
+                   "message": f"📝 正在撰写引言...", "content": introduction}
+
+        # 生成3个主要章节
+        sections = []
+        previous_content = introduction
+        for i in range(1, 4):
+            current_step += 1
+            section = generate_section_content(topic, i, previous_content)
+            if capture_response:
+                return {"type": "progress", "step": current_step, "total": total_steps, 
+                       "message": f"📚 正在创作第{i}章节...", "content": section[:200]}
+            sections.append(section)
+            previous_content = section
+
+        # 生成结尾
+        current_step += 1
+        epilogue = generate_epilogue(topic)
+        if capture_response:
+            return {"type": "progress", "step": current_step, "total": total_steps, 
+                   "message": f"🎯 正在总结升华...", "content": epilogue}
+
+        # 获取配图
+        current_step += 1
+        images = get_unsplash_images(topic)
+        if capture_response:
+            return {"type": "progress", "step": current_step, "total": total_steps, 
+                   "message": "🎨 正在配置插图...", "content": str(images)}
+        
+        # 格式化文章
+        current_step += 1
+        article = format_article(title, sections, images, topic)
+        if capture_response:
+            return {"type": "progress", "step": current_step, "total": total_steps, 
+                   "message": "✨ 正在优化排版...", "content": "格式化完成"}
+        
+        # 验证文章
+        if not validate_article(article):
+            raise ValueError("Generated article validation failed")
+            
+        # 保存文章
+        file_path = save_article(article, topic)
+        return article
+
+    except Exception as e:
+        print(f"Error generating blog: {str(e)}")
+        raise
+
+def generate_with_progress(topic, title=None, type_name='blog', progress_callback=None):
+    """
+    带进度追踪的文章生成函数
+    :param topic: 文章主题
+    :param title: 文章标题，如果为None则使用主题作为标题
+    :param type_name: 文章类型
+    :param progress_callback: 进度回调函数
+    :return: 生成的文章内容
+    """
+    try:
+        if progress_callback:
+            progress_callback({
+                'type': 'progress',
+                'step': 0,
+                'total': 7,
+                'message': '准备开始生成...',
+                'content': ''
+            })
+
+        # 生成标题
+        if progress_callback:
+            progress_callback({
+                'type': 'progress',
+                'step': 1,
+                'total': 7,
+                'message': '正在构思吸引人的标题...',
+                'content': ''
+            })
+        
+        # 使用传入的标题或主题作为标题
+        if title is None:
+            title = topic
+        # 生成引言
+        if progress_callback:
+            progress_callback({
+                'type': 'progress',
+                'step': 2,
+                'total': 7,
+                'message': '正在撰写引人入胜的开篇...',
+                'content': ''
+            })
+        
+        intro = generate_introduction(topic)
+        if not intro:
+            raise ValueError("Failed to generate introduction")
+        article_content = [f"# {title}\n\n", f"## 引言\n\n{intro}\n\n"]
+        
+        # 生成三个主要部分
+        for i in range(1, 4):
+            if progress_callback:
+                progress_callback({
+                    'type': 'progress',
+                    'step': i + 2,
+                    'total': 7,
+                    'message': f'正在深入探讨第{i}个核心观点...',
+                    'content': ''
+                })
+            
+            section = generate_section_content(topic, i, '\n'.join(article_content))
+            if not section:
+                raise ValueError(f"Failed to generate section {i}")
+            article_content.append(f"## 第{i}章\n\n{section}\n\n")
+            
+            # 如果不是最后一个部分，添加过渡段落
+            if i < 3:
+                transition = generate_transition('\n'.join(article_content), f"第{i+1}章")
+                if transition:
+                    article_content.append(f"{transition}\n\n")
+        
+        # 生成结语
+        if progress_callback:
+            progress_callback({
+                'type': 'progress',
+                'step': 6,
+                'total': 7,
+                'message': '正在总结凝练核心观点...',
+                'content': ''
+            })
+        
+        epilogue = generate_epilogue(topic)
+        if not epilogue:
+            raise ValueError("Failed to generate epilogue")
+        article_content.append(f"\n## 结语\n\n{epilogue}\n")
+        
+        # 获取配图
+        try:
+            images = get_unsplash_images(topic)
+        except Exception as e:
+            print(f"Warning: Failed to fetch images: {e}")
+            images = []
+            
+        # 格式化文章
+        if progress_callback:
+            progress_callback({
+                'type': 'progress',
+                'step': 7,
+                'total': 7,
+                'message': '正在进行最后的优化完善...',
+                'content': ''
+            })
+        
+        final_content = format_article(title, article_content, images, topic)
+        
+        # 验证文章
+        if not validate_article(final_content):
+            raise ValueError("Generated article failed validation")
+            
+        return final_content
+        
+    except Exception as e:
+        print(f"Error in generate_with_progress: {e}")
+        if progress_callback:
+            progress_callback({
+                'type': 'error',
+                'message': f'生成过程出错: {str(e)}'
+            })
+        return None
+
 def main():
     if len(sys.argv) != 2:
         print("使用方法: python blog_generator.py <输入文件名>")
@@ -470,9 +689,7 @@ def main():
             
         for topic in topics:
             print(f"\n开始生成关于 '{topic}' 的文章...")
-            article = generate_article(topic)
-            if article:
-                save_article(article, topic)
+            generate_blog(topic)
                 
         print("\n所有文章生成完成！")
         
